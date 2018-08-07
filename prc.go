@@ -1,71 +1,130 @@
 package main
 
 import (
+	"errors"
 	"log"
+	"reflect"
 
 	"github.com/nats-io/go-nats"
 )
 
-/*HandlerFunc is the standart callback to process message
- */
-type HandlerFunc func(*Context)
+//HandlerFunc is the standart callback to process message
+// used signature handler := func(subject, reply string, o *obj)
+//
+// Handler is a specific callback used for Subscribe. It is generalized to
+// an interface{}, but we will discover its format and arguments at runtime
+// and perform the correct callback, including de-marshaling JSON strings
+// back into the appropriate struct based on the signature of the Handler.
+//
+// Handlers are expected to have one of four signatures.
+//
+//	type person struct {
+//		Name string `json:"name,omitempty"`
+//		Age  uint   `json:"age,omitempty"`
+//	}
+//
+//	handler := func(m *Msg)
+//	handler := func(p *person)
+//	handler := func(subject string, o *obj)
+//	handler := func(subject, reply string, o *obj)
+//
+// These forms allow a callback to request a raw Msg ptr, where the processing
+// of the message from the wire is untouched. Process a JSON representation
+// and demarshal it into the given struct, e.g. person.
+// There are also variants where the callback wants either the subject, or the
+// subject and the reply subject.
+type HandlerFunc nats.Handler
 
+/*
 // Context is the RPC call context
 type Context struct {
-	Engine  *Engine
-	Message *nats.Msg
+	Subject string
+	Reply   string
 }
+*/
 
 /*Engine is the natsrpc instance
  */
 type Engine struct {
 	SubjectBase string
-	natsCnn     *nats.Conn
+	url         string
+	natsCnn     *nats.EncodedConn
 	handlers    map[string]HandlerFunc
 	exit        chan struct{}
 }
 
-/*New ctreats Engine and connects to nats
+/*New ctreats Engine
  */
-func New(urls string, base string) (*Engine, error) {
+func New(urls string, base string) *Engine {
 	engine := &Engine{
 		SubjectBase: base,
 	}
 	if urls == "" {
 		urls = nats.DefaultURL
 	}
-	log.Printf("Url '%v'", urls)
-	var err error
-	engine.natsCnn, err = nats.Connect(urls)
-	if err != nil {
-		//log.fatal("Can't connect: %v\n", err)
-		return nil, err
-	}
+	engine.url = urls
+	log.Printf("Url '%v'", engine.url)
 
-	return engine, nil
+	return engine
 }
 
-//Serve implement rpc call
+//Register register rpc call
 //cmd is the last prt of subj, if SubjectBase='bigzz.api' and cmd='getbonus' full subject = 'bigzz.api.getbonus'
-//message body is the list of parametrs
-func (engine *Engine) Serve(cmd string, hendler HandlerFunc) {
+//message body is json encoded struct (parametr 4 handler)
+func (engine *Engine) Register(cmd string, handler HandlerFunc) error {
+	if engine.natsCnn != nil {
+		//TODO refactor to mutex
+		return errors.New("can't register handler while nats running")
+	}
+	if handler == nil {
+		return errors.New("nats: Handler required")
+	}
+
+	if reflect.TypeOf(handler).Kind() != reflect.Func {
+		panic("nats: Handler needs to be a func")
+	}
+	log.Printf("Register '%v'", cmd)
 	if engine.handlers == nil {
 		engine.handlers = make(map[string]HandlerFunc)
 	}
 	subj := engine.SubjectBase + "." + cmd
-	engine.handlers[subj] = hendler
-	_, e := engine.natsCnn.Subscribe(subj, engine.routMessage)
-	if e != nil {
-		log.Fatalf("Can't connect: %v\n", e)
-	}
+	engine.handlers[subj] = handler
 
+	return nil
 }
 
-//Run blocks execution
-func (engine *Engine) Run() {
+//Run start nats, subscribe rpc calls, blocks
+func (engine *Engine) Run() error {
+
+	if engine.handlers == nil {
+		return errors.New("No handlers")
+	}
+
+	log.Print("Connecting nats ...")
+	//start nats
+	cnn, err := nats.Connect(engine.url)
+	if err != nil {
+		return err
+	}
+	engine.natsCnn, err = nats.NewEncodedConn(cnn, nats.JSON_ENCODER)
+	if err != nil {
+		return err
+	}
+	log.Print("Connected")
+
+	//subscribe rpc's
+	for subj, h := range engine.handlers {
+		_, e := engine.natsCnn.Subscribe(subj, h)
+		if e != nil {
+			log.Printf("Can't subscribe: %v\n", e)
+		}
+	}
+	log.Print("Subscribe rpc complited")
+
 	engine.exit = make(chan struct{})
 	<-engine.exit
 	//TODO usub and so on
+	return nil
 }
 
 //Stop blcking
@@ -74,6 +133,7 @@ func (engine *Engine) Stop() {
 	close(engine.exit)
 }
 
+/*
 func (engine *Engine) routMessage(msg *nats.Msg) {
 	hendler := engine.handlers[msg.Subject]
 	if hendler == nil {
@@ -87,3 +147,4 @@ func (engine *Engine) routMessage(msg *nats.Msg) {
 	//call
 	go hendler(&c)
 }
+*/

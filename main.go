@@ -2,33 +2,57 @@ package main
 
 import (
 	"log"
+	"time"
+
+	nats "github.com/nats-io/go-nats"
 )
+
+func runrpc() {
+	r := New("nats://demo.nats.io:4222", "bigzz.api")
+
+	r.Register("ping", func(subject, reply string, req string) {
+		if reply != "" {
+			r.natsCnn.Publish(reply, "I'm ok. You say '"+req+"'")
+		}
+	})
+	r.Run()
+}
 
 func main() {
 
-	r, e := New("nats://demo.nats.io:4222", "bigzz.api")
-	if e != nil {
-		log.Fatalf("Can't connect: %v\n", e)
+	go runrpc()
+	//r.Serve("exit", exitH)
+
+	c, err := nats.Connect("nats://demo.nats.io:4222")
+	if err != nil {
+		log.Fatalf("Can't connect: %v\n", err)
+	}
+	var cnn *nats.EncodedConn
+	cnn, err = nats.NewEncodedConn(c, nats.JSON_ENCODER)
+	if err != nil {
+		log.Fatalf("Can't connect: %v\n", err)
 	}
 
-	r.Serve("ping", pingH)
-	r.Serve("exit", exitH)
+	cnn.Publish("bigzz.api.ping", []byte("msg1"))
+	var resp string
+	resp = "No resp"
+	cnn.Request("bigzz.api.ping", []byte("msg2"), &resp, 10*time.Second)
+	log.Printf("Resp '%v'", resp)
+	cnn.Flush()
 
-	r.natsCnn.Publish("bigzz.api.ping", []byte("msg1"))
-	r.natsCnn.Publish("bigzz.api.ping", []byte("msg2"))
-	r.natsCnn.Flush()
-	r.natsCnn.Publish("bigzz.api.exit", []byte("msg3"))
-
-	r.natsCnn.Flush()
-	if err := r.natsCnn.LastError(); err != nil {
+	/*
+		r.natsCnn.Publish("bigzz.api.exit", []byte("msg3"))
+		r.natsCnn.Flush()
+	*/
+	if err := cnn.LastError(); err != nil {
 		log.Fatal(err)
 	}
-	r.Run()
 
 	log.Println("Exit")
 
 }
 
+/*
 func pingH(c *Context) {
 	log.Println("ping from " + c.Message.Subject + ";msg " + string(c.Message.Data))
 }
@@ -38,3 +62,4 @@ func exitH(c *Context) {
 
 	c.Engine.Stop()
 }
+*/
