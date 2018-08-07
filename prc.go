@@ -83,11 +83,11 @@ func (engine *Engine) Register(cmd string, handler HandlerFunc) error {
 	if reflect.TypeOf(handler).Kind() != reflect.Func {
 		panic("nats: Handler needs to be a func")
 	}
-	log.Printf("Register '%v'", cmd)
 	if engine.handlers == nil {
 		engine.handlers = make(map[string]HandlerFunc)
 	}
 	subj := engine.SubjectBase + "." + cmd
+	log.Printf("Register '%v'", subj)
 	engine.handlers[subj] = handler
 
 	return nil
