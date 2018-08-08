@@ -110,6 +110,7 @@ func (engine *Engine) Run() error {
 	if err != nil {
 		return err
 	}
+	defer engine.natsCnn.Close()
 	log.Print("Connected")
 
 	//subscribe rpc's
