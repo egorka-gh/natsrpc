@@ -1,2 +1,4 @@
 github.com/powerman/rpc-codec/jsonrpc2
 https://golang.org/src/net/rpc/jsonrpc/
+
+https://github.com/tinylib/msgp
