@@ -9,7 +9,7 @@ import (
 )
 
 //HandlerFunc is the standart callback to process message
-type HandlerFunc func(*Context)
+type HandlerFunc func(*Runer)
 
 type handlersChain []HandlerFunc
 
@@ -21,16 +21,19 @@ type Engine struct {
 
 	natsCnn *nats.Conn
 	rpcsMu  sync.RWMutex
-	rpcs    map[string]rpc
+	rpcs    map[string]Runer
 	exit    chan struct{}
 }
 
-type rpc struct {
+//Runer runs RPC's on concrete subscription
+type Runer struct {
 	mu       sync.Mutex
-	handlers handlersChain
 	engine   *Engine
+	handlers handlersChain
+	msg      *nats.Msg
 }
 
+/*
 //Context is the RPC call context
 type Context struct {
 	Enc Encoder
@@ -39,20 +42,7 @@ type Context struct {
 	engine *Engine
 }
 
-func (r *rpc) run(msg *nats.Msg) {
-	//TODO create context
-	//TODO decode msg from msgp
-	c := &Context{
-		msg:    msg,
-		engine: r.engine,
-		Enc:    r.engine.Enc,
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, h := range r.handlers {
-		go h(c)
-	}
-}
+*/
 
 /*New ctreats Engine
  */
@@ -81,14 +71,14 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	defer engine.rpcsMu.Unlock()
 
 	if engine.rpcs == nil {
-		engine.rpcs = make(map[string]rpc)
+		engine.rpcs = make(map[string]Runer)
 	}
 	subj := engine.SubjectBase + "." + cmd
 	log.Printf("Register '%v'", subj)
 	r, ok := engine.rpcs[subj]
 	if !ok {
 		//init rpc
-		r = rpc{engine: engine}
+		r = Runer{engine: engine, handlers: handlersChain{}}
 		engine.rpcs[subj] = r
 	}
 	r.mu.Lock()
@@ -110,16 +100,28 @@ func (engine *Engine) Run() error {
 	if engine.natsCnn == nil {
 		return errors.New("Not connected")
 	}
-	if engine.rpcs == nil {
-		return errors.New("No handlers")
-	}
+	/*
+		if engine.rpcs == nil {
+			return errors.New("No handlers")
+		}
+	*/
 
 	log.Print("rpc: Started")
 
 	engine.exit = make(chan struct{})
-	<-engine.exit
+	for engine.exit != nil {
+		select {
+		case _, ok := <-engine.exit:
+			if !ok {
+				engine.exit = nil
+			}
+		}
+	}
+
 	//TODO usubcribe
-	//TODO waite for runing runers
+	//TODO waite for started runers
+
+	//exit
 	return nil
 }
 
@@ -127,4 +129,41 @@ func (engine *Engine) Run() error {
 func (engine *Engine) Stop() {
 
 	close(engine.exit)
+}
+
+//callback 4 nats msg
+func (r *Runer) run(msg *nats.Msg) {
+	//TODO decode msg from msgp
+	//create copy
+	c := &Runer{
+		msg:    msg,
+		engine: r.engine,
+	}
+	r.mu.Lock()
+	c.handlers = append(handlersChain{}, r.handlers...)
+	r.mu.Unlock()
+
+	//run in parallel
+	for _, h := range c.handlers {
+		go h(c)
+	}
+}
+
+//Decode  decode msg body to obj using current encoder
+func (r *Runer) Decode(obj interface{}) error {
+	return r.engine.Enc.Decode(r.msg.Data, obj)
+}
+
+//Reply  encode msg body to obj using current encoder
+// and  publish reply msg
+func (r *Runer) Reply(obj interface{}) error {
+	if r.msg.Reply == "" {
+		return nil
+	}
+	//TODO encode msg.Data to msgp
+	b, err := r.engine.Enc.Encode(obj)
+	if err != nil {
+		return err
+	}
+	return r.engine.natsCnn.Publish(r.msg.Reply, b)
 }

@@ -8,18 +8,21 @@ import (
 	nats "github.com/nats-io/go-nats"
 )
 
-func runrpc() {
-	r := New("nats://demo.nats.io:4222", "bigzz.api")
+func runrpc(c *nats.Conn) {
+	r := New(c, "bigzz.api")
 
-	e := r.Register("bonus", func(subject, reply string, param *BonusReq) {
-		log.Print("Get req " + subject + " -> " + reply)
+	e := r.Register("bonus", func(r *Runer) {
+		log.Print("Get req " + r.msg.Subject + " -> " + r.msg.Reply)
+		param := &BonusReq{}
+		e := r.Decode(param)
+		if e != nil {
+			log.Printf("Can't decode %v", e)
+		}
 		log.Printf("Param %v; %v", param.Accaunt, param.Total)
-		if reply != "" {
-			resp := BonusResp{param.Accaunt, param.Total * 0.9, 10.0, "External discount 10%"}
-			e := r.natsCnn.Publish(reply, &resp)
-			if e != nil {
-				log.Printf("Cant publish respond  %v", e)
-			}
+		resp := &BonusResp{param.Accaunt, param.Total * 0.9, 10.0, "External discount 10%"}
+		r.Reply(resp)
+		if e != nil {
+			log.Printf("Cant publish respond  %v", e)
 		}
 	})
 	if e != nil {
@@ -55,14 +58,14 @@ func WaitTime(ch chan bool, timeout time.Duration) error {
 }
 
 func main() {
-
-	go runrpc()
-	//r.Serve("exit", exitH)
-
 	c, err := nats.Connect("nats://demo.nats.io:4222")
 	if err != nil {
 		log.Fatalf("Can't connect: %v\n", err)
 	}
+
+	go runrpc(c)
+	//r.Serve("exit", exitH)
+
 	var cnn *nats.EncodedConn
 	cnn, err = nats.NewEncodedConn(c, nats.JSON_ENCODER)
 	if err != nil {
