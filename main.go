@@ -9,17 +9,17 @@ import (
 )
 
 func runrpc(c *nats.Conn) {
-	r := New(c, "bigzz.api")
+	rr := New(c, "bigzz.api")
 
-	e := r.Register("bonus", func(r *Runer) {
+	e := rr.Register("bonus", func(r *Runer) {
 		log.Print("Get req " + r.msg.Subject + " -> " + r.msg.Reply)
 		param := &BonusReq{}
 		e := r.Decode(param)
 		if e != nil {
-			log.Printf("Can't decode %v", e)
+			log.Printf("Can't decode %v, err: %v", r.msg.Data, e)
 		}
 		log.Printf("Param %v; %v", param.Accaunt, param.Total)
-		resp := &BonusResp{param.Accaunt, param.Total * 0.9, 10.0, "External discount 10%"}
+		resp := &BonusResp{param.Accaunt, param.Total * 0.9, 10.0, "RPC1. External discount 10%"}
 		r.Reply(resp)
 		if e != nil {
 			log.Printf("Cant publish respond  %v", e)
@@ -29,22 +29,33 @@ func runrpc(c *nats.Conn) {
 		log.Printf("Cant Register %v; %v", "bonus", e)
 	}
 
-	e = r.Register("quit", func(msg *nats.Msg) {
-		log.Printf("Get: %v; Inbox: %v; Body %v", msg.Subject, msg.Reply, msg.Data)
-		log.Print("Stopping rpc....")
-		if msg.Reply != "" {
-			e := r.natsCnn.Publish(msg.Reply, "I'm stopping")
-			if e != nil {
-				log.Printf("Cant publish %v", e)
-			}
+	e = rr.Register("bonus", func(r *Runer) {
+		log.Print("Get req " + r.msg.Subject + " -> " + r.msg.Reply)
+		param := &BonusReq{}
+		e := r.Decode(param)
+		if e != nil {
+			log.Printf("Can't decode %v, err: %v", r.msg.Data, e)
 		}
-		r.Stop()
+		log.Printf("Param %v; %v", param.Accaunt, param.Total)
+		resp := &BonusResp{param.Accaunt, param.Total - param.Total*0.9, 10.0, "RPC2. Cashback 10%"}
+		r.Reply(resp)
+		if e != nil {
+			log.Printf("Cant publish respond  %v", e)
+		}
+	})
+	if e != nil {
+		log.Printf("Cant Register %v; %v", "bonus", e)
+	}
+
+	e = rr.Register("quit", func(r *Runer) {
+		log.Print("Stopping rpc....")
+		r.engine.Stop()
 	})
 	if e != nil {
 		log.Printf("Cant Register %v; %v", "quit", e)
 	}
 
-	r.Run()
+	rr.Run()
 }
 
 //WaitTime Wait for a chan with a timeout.
@@ -74,7 +85,6 @@ func main() {
 	defer cnn.Close()
 
 	cnn.Publish("bigzz.api.bonus", &BonusReq{"00123", 100.11})
-	cnn.Flush()
 
 	var resp = new(BonusResp) //*BonusResp
 	cnn.Request("bigzz.api.bonus", &BonusReq{"003", 220.0}, resp, 10*time.Second)
@@ -97,6 +107,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	time.Sleep(7 * time.Second)
 	log.Println("main: Exit")
 
 }

@@ -21,7 +21,7 @@ type Engine struct {
 
 	natsCnn *nats.Conn
 	rpcsMu  sync.RWMutex
-	rpcs    map[string]Runer
+	rpcs    map[string]*Runer
 	exit    chan struct{}
 }
 
@@ -71,14 +71,14 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	defer engine.rpcsMu.Unlock()
 
 	if engine.rpcs == nil {
-		engine.rpcs = make(map[string]Runer)
+		engine.rpcs = make(map[string]*Runer)
 	}
 	subj := engine.SubjectBase + "." + cmd
 	log.Printf("Register '%v'", subj)
 	r, ok := engine.rpcs[subj]
 	if !ok {
 		//init rpc
-		r = Runer{engine: engine, handlers: handlersChain{}}
+		r = &Runer{engine: engine, handlers: handlersChain{}}
 		engine.rpcs[subj] = r
 	}
 	r.mu.Lock()
