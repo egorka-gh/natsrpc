@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"log"
+	"natsrpc"
 	"sync"
 	"time"
 
@@ -10,28 +11,28 @@ import (
 )
 
 func runrpc(c *nats.Conn, wg *sync.WaitGroup) {
-	rr := New(c, "bigzz.api")
+	rr := natsrpc.New(c, "bigzz.api")
 
-	e := rr.Register("bonus", func(r *Runer) {
+	e := rr.Register("bonus", func(r *natsrpc.Runer) {
 		param := &BonusReq{}
 		e := r.Decode(param)
 		if e != nil {
-			log.Printf("Can't decode %v, err: %v", r.msg.Data, e)
+			log.Printf("Can't decode %v, err: %v", r.RawData(), e)
 		}
-		log.Printf("RPC1. Get %s -> %s.\n Param %v; %v", r.msg.Subject, r.msg.Reply, param.Accaunt, param.Total)
+		log.Printf("RPC1. Get %s -> %s.\n Param %v; %v", r.Subject(), r.ReplyTo(), param.Accaunt, param.Total)
 		resp := &BonusResp{param.Accaunt, param.Total * 0.9, 10.0, "RPC1. External discount 10%"}
 		r.Reply(resp)
 		if e != nil {
 			log.Printf("Cant publish respond  %v", e)
 		}
 	},
-		func(r *Runer) {
+		func(r *natsrpc.Runer) {
 			param := &BonusReq{}
 			e := r.Decode(param)
 			if e != nil {
-				log.Printf("Can't decode %v, err: %v", r.msg.Data, e)
+				log.Printf("Can't decode %v, err: %v", r.RawData(), e)
 			}
-			log.Printf("RPC2. Get %s -> %s.\n Param %v; %v", r.msg.Subject, r.msg.Reply, param.Accaunt, param.Total)
+			log.Printf("RPC2. Get %s -> %s.\n Param %v; %v", r.Subject(), r.ReplyTo(), param.Accaunt, param.Total)
 			resp := &BonusResp{param.Accaunt, param.Total - param.Total*0.9, 10.0, "RPC2. Cashback"}
 			r.Reply(resp)
 			if e != nil {
@@ -42,12 +43,11 @@ func runrpc(c *nats.Conn, wg *sync.WaitGroup) {
 		log.Printf("Cant Register %v; %v", "bonus", e)
 	}
 
-	e = rr.Register("bonus", func(r *Runer) {
-		log.Print("Get req " + r.msg.Subject + " -> " + r.msg.Reply)
+	e = rr.Register("bonus", func(r *natsrpc.Runer) {
 		param := &BonusReq{}
 		e := r.Decode(param)
 		if e != nil {
-			log.Printf("Can't decode %v, err: %v", r.msg.Data, e)
+			log.Printf("Can't decode %v, err: %v", r.RawData(), e)
 		}
 		log.Printf("RPC3. Param %v; %v", param.Accaunt, param.Total)
 		resp := &BonusResp{param.Accaunt, param.Total, 0, "RPC3."}
@@ -60,10 +60,10 @@ func runrpc(c *nats.Conn, wg *sync.WaitGroup) {
 		log.Printf("Cant Register %v; %v", "bonus", e)
 	}
 
-	e = rr.Register("quit", func(r *Runer) {
+	e = rr.Register("quit", func(r *natsrpc.Runer) {
 		log.Print("Stopping rpc....")
 		r.Reply("I'm stopping")
-		r.engine.Stop()
+		r.StopEngine()
 	})
 	if e != nil {
 		log.Printf("Cant Register %v; %v", "quit", e)

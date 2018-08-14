@@ -1,4 +1,4 @@
-package main
+package natsrpc
 
 import (
 	"errors"
@@ -50,10 +50,10 @@ func New(cnn *nats.Conn, base string) *Engine {
 //rpc commad is the last part of subj, if SubjectBase='bigzz.api' and cmd='getbonus' full subject = 'bigzz.api.getbonus'
 func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	if engine.natsCnn == nil {
-		return errors.New("rpc: has no connection")
+		return errors.New("natsrpc: has no connection")
 	}
 	if len(handler) == 0 {
-		return errors.New("rpc: Handler required")
+		return errors.New("natsrpc: Handler required")
 	}
 
 	engine.rpcsMu.Lock()
@@ -63,7 +63,6 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 		engine.rpcs = make(map[string]*Runer)
 	}
 	subj := engine.SubjectBase + "." + cmd
-	log.Printf("Register '%v'", subj)
 	r, ok := engine.rpcs[subj]
 	if !ok {
 		//init rpc
@@ -89,10 +88,10 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 func (engine *Engine) Run() error {
 
 	if engine.natsCnn == nil {
-		return errors.New("Not connected")
+		return errors.New("natsrpc: Not connected")
 	}
 
-	log.Print("rpc: Started")
+	log.Print("natsrpc: Started")
 
 	engine.exit = make(chan struct{})
 	for engine.exit != nil {
@@ -124,7 +123,6 @@ func (engine *Engine) Stop() {
 
 //callback 4 nats msg
 func (r *Runer) run(msg *nats.Msg) {
-	log.Print("rpc: Runer.run")
 	//TODO decode msg from msgp
 	//create copy
 	c := &Runer{
@@ -158,4 +156,33 @@ func (r *Runer) Reply(obj interface{}) error {
 		return err
 	}
 	return r.engine.natsCnn.Publish(r.msg.Reply, b)
+}
+
+//RawData  returns raw message data
+func (r *Runer) RawData() []byte {
+	if r.msg == nil {
+		return nil
+	}
+	return r.msg.Data
+}
+
+//Subject returns rpc topic
+func (r *Runer) Subject() string {
+	if r.msg == nil {
+		return ""
+	}
+	return r.msg.Subject
+}
+
+//ReplyTo returns rpc reply topic
+func (r *Runer) ReplyTo() string {
+	if r.msg == nil {
+		return ""
+	}
+	return r.msg.Reply
+}
+
+//StopEngine stop engine
+func (r *Runer) StopEngine() {
+	r.engine.Stop()
 }

@@ -1,4 +1,4 @@
-package main
+package natsrpc
 
 import (
 	"encoding/json"
