@@ -25,7 +25,7 @@ type Engine struct {
 	exit    chan struct{}
 }
 
-//Runer runs RPC's on concrete subscription
+//Runer runs registered HandlerFunc on concrete subscription
 type Runer struct {
 	mu       sync.Mutex
 	engine   *Engine
@@ -33,17 +33,6 @@ type Runer struct {
 	sub      *nats.Subscription
 	msg      *nats.Msg
 }
-
-/*
-//Context is the RPC call context
-type Context struct {
-	Enc Encoder
-
-	msg    *nats.Msg
-	engine *Engine
-}
-
-*/
 
 /*New ctreats Engine
  */
@@ -58,8 +47,7 @@ func New(cnn *nats.Conn, base string) *Engine {
 }
 
 //Register register rpc call's
-//cmd is the last prt of subj, if SubjectBase='bigzz.api' and cmd='getbonus' full subject = 'bigzz.api.getbonus'
-//message body is json encoded struct (parametr 4 handler)
+//rpc commad is the last part of subj, if SubjectBase='bigzz.api' and cmd='getbonus' full subject = 'bigzz.api.getbonus'
 func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	if engine.natsCnn == nil {
 		return errors.New("rpc: has no connection")
@@ -103,11 +91,6 @@ func (engine *Engine) Run() error {
 	if engine.natsCnn == nil {
 		return errors.New("Not connected")
 	}
-	/*
-		if engine.rpcs == nil {
-			return errors.New("No handlers")
-		}
-	*/
 
 	log.Print("rpc: Started")
 
