@@ -30,6 +30,7 @@ type Runer struct {
 	mu       sync.Mutex
 	engine   *Engine
 	handlers handlersChain
+	sub      *nats.Subscription
 	msg      *nats.Msg
 }
 
@@ -86,9 +87,11 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	r.handlers = append(r.handlers, handler...)
 	//subscribe if new rpc
 	if !ok {
-		if _, err := engine.natsCnn.Subscribe(subj, r.run); err != nil {
+		sub, err := engine.natsCnn.Subscribe(subj, r.run)
+		if err != nil {
 			return err
 		}
+		r.sub = sub
 
 	}
 	return nil
@@ -118,7 +121,12 @@ func (engine *Engine) Run() error {
 		}
 	}
 
-	//TODO usubcribe
+	//usubcribe
+	for _, r := range engine.rpcs {
+		if r.sub != nil {
+			r.sub.Unsubscribe()
+		}
+	}
 	//TODO waite for started runers
 
 	//exit
@@ -133,6 +141,7 @@ func (engine *Engine) Stop() {
 
 //callback 4 nats msg
 func (r *Runer) run(msg *nats.Msg) {
+	log.Print("rpc: Runer.run")
 	//TODO decode msg from msgp
 	//create copy
 	c := &Runer{

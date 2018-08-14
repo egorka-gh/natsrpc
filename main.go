@@ -3,12 +3,13 @@ package main
 import (
 	"errors"
 	"log"
+	"sync"
 	"time"
 
 	nats "github.com/nats-io/go-nats"
 )
 
-func runrpc(c *nats.Conn) {
+func runrpc(c *nats.Conn, wg *sync.WaitGroup) {
 	rr := New(c, "bigzz.api")
 
 	e := rr.Register("bonus", func(r *Runer) {
@@ -49,12 +50,13 @@ func runrpc(c *nats.Conn) {
 
 	e = rr.Register("quit", func(r *Runer) {
 		log.Print("Stopping rpc....")
+		r.Reply("I'm stopping")
 		r.engine.Stop()
 	})
 	if e != nil {
 		log.Printf("Cant Register %v; %v", "quit", e)
 	}
-
+	wg.Done()
 	rr.Run()
 }
 
@@ -74,7 +76,10 @@ func main() {
 		log.Fatalf("Can't connect: %v\n", err)
 	}
 
-	go runrpc(c)
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go runrpc(c, wg)
+	wg.Wait()
 	//r.Serve("exit", exitH)
 
 	var cnn *nats.EncodedConn
@@ -84,10 +89,18 @@ func main() {
 	}
 	defer cnn.Close()
 
-	cnn.Publish("bigzz.api.bonus", &BonusReq{"00123", 100.11})
+	log.Println("main: Simple Publish ")
+	err = cnn.Publish("bigzz.api.bonus", &BonusReq{"00123", 100.11})
+	if err != nil {
+		log.Printf("main: Publish err: %v\n", err)
+	}
 
+	log.Println("main: Request")
 	var resp = new(BonusResp) //*BonusResp
-	cnn.Request("bigzz.api.bonus", &BonusReq{"003", 220.0}, resp, 10*time.Second)
+	err = cnn.Request("bigzz.api.bonus", &BonusReq{"003", 220.0}, resp, 10*time.Second)
+	if err != nil {
+		log.Printf("main: Publish err: %v\n", err)
+	}
 	log.Printf("main: Resp '%v'", resp)
 
 	ch := make(chan bool)
