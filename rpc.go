@@ -8,7 +8,7 @@ import (
 	"github.com/nats-io/go-nats"
 )
 
-//HandlerFunc is the standart callback to process message
+//HandlerFunc is the standart callback to process rpc message
 type HandlerFunc func(*Runer)
 
 type handlersChain []HandlerFunc
@@ -35,6 +35,8 @@ type Runer struct {
 }
 
 /*New ctreats Engine
+* cnn - nats connection
+* base - subject prefix for rpc commands
  */
 func New(cnn *nats.Conn, base string) *Engine {
 	engine := &Engine{
