@@ -31,6 +31,7 @@ type runer struct {
 	engine   *Engine
 	handlers handlersChain
 	sub      *nats.Subscription
+	cnt      int
 	waiting  sync.WaitGroup
 }
 
@@ -142,8 +143,10 @@ func (r *runer) run(msg *nats.Msg) {
 		engine: r.engine,
 	}
 	r.mu.Lock()
-	var handlers handlersChain
-	handlers = append(handlersChain{}, r.handlers...)
+	var handlers = make(handlersChain, 0, len(r.handlers))
+	copy(handlers, r.handlers)
+	//handlers = append(handlersChain{}, r.handlers...)
+	r.cnt++
 	r.mu.Unlock()
 
 	//run in parallel
