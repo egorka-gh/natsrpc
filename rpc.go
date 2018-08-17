@@ -9,7 +9,7 @@ import (
 )
 
 //HandlerFunc is the standart callback to process rpc message
-type HandlerFunc func(*Runer)
+type HandlerFunc func(*M)
 
 type handlersChain []HandlerFunc
 
@@ -21,17 +21,23 @@ type Engine struct {
 
 	natsCnn *nats.Conn
 	rpcsMu  sync.RWMutex
-	rpcs    map[string]*Runer
+	rpcs    map[string]*runer
 	exit    chan struct{}
 }
 
 //Runer runs registered HandlerFunc on concrete subscription
-type Runer struct {
+type runer struct {
 	mu       sync.Mutex
 	engine   *Engine
 	handlers handlersChain
 	sub      *nats.Subscription
-	msg      *nats.Msg
+	waiting  sync.WaitGroup
+}
+
+//M simple message context for HandlerFunc
+type M struct {
+	engine *Engine
+	msg    *nats.Msg
 }
 
 /*New ctreats Engine
@@ -62,13 +68,13 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	defer engine.rpcsMu.Unlock()
 
 	if engine.rpcs == nil {
-		engine.rpcs = make(map[string]*Runer)
+		engine.rpcs = make(map[string]*runer)
 	}
 	subj := engine.SubjectBase + "." + cmd
 	r, ok := engine.rpcs[subj]
 	if !ok {
 		//init rpc
-		r = &Runer{engine: engine, handlers: handlersChain{}}
+		r = &runer{engine: engine, handlers: handlersChain{}}
 		engine.rpcs[subj] = r
 	}
 	r.mu.Lock()
@@ -111,7 +117,11 @@ func (engine *Engine) Run() error {
 			r.sub.Unsubscribe()
 		}
 	}
-	//TODO waite for started runers
+
+	//waite for started runers before quit
+	for _, r := range engine.rpcs {
+		r.wait()
+	}
 
 	//exit
 	return nil
@@ -124,67 +134,77 @@ func (engine *Engine) Stop() {
 }
 
 //callback 4 nats msg
-func (r *Runer) run(msg *nats.Msg) {
+func (r *runer) run(msg *nats.Msg) {
 	//TODO decode msg from msgp
 	//create copy
-	c := &Runer{
+	m := &M{
 		msg:    msg,
 		engine: r.engine,
 	}
 	r.mu.Lock()
-	c.handlers = append(handlersChain{}, r.handlers...)
+	var handlers handlersChain
+	handlers = append(handlersChain{}, r.handlers...)
 	r.mu.Unlock()
 
 	//run in parallel
-	for _, h := range c.handlers {
-		go h(c)
+	for _, h := range handlers {
+		r.waiting.Add(1)
+		go func(f HandlerFunc, m *M, wg *sync.WaitGroup) {
+			defer wg.Done()
+			f(m)
+		}(h, m, &r.waiting)
 	}
 }
 
+//waits all running goroutines
+func (r *runer) wait() {
+	r.waiting.Wait()
+}
+
 //Decode  decode msg body to obj using current encoder
-func (r *Runer) Decode(obj interface{}) error {
-	return r.engine.Enc.Decode(r.msg.Data, obj)
+func (m *M) Decode(obj interface{}) error {
+	return m.engine.Enc.Decode(m.msg.Data, obj)
 }
 
 //Reply  encode msg body to obj using current encoder
 // and  publish reply msg
-func (r *Runer) Reply(obj interface{}) error {
-	if r.msg.Reply == "" {
+func (m *M) Reply(obj interface{}) error {
+	if m.msg.Reply == "" {
 		return nil
 	}
 	//TODO encode msg.Data to msgp
-	b, err := r.engine.Enc.Encode(obj)
+	b, err := m.engine.Enc.Encode(obj)
 	if err != nil {
 		return err
 	}
-	return r.engine.natsCnn.Publish(r.msg.Reply, b)
+	return m.engine.natsCnn.Publish(m.msg.Reply, b)
 }
 
 //RawData  returns raw message data
-func (r *Runer) RawData() []byte {
-	if r.msg == nil {
+func (m *M) RawData() []byte {
+	if m.msg == nil {
 		return nil
 	}
-	return r.msg.Data
+	return m.msg.Data
 }
 
 //Subject returns rpc topic
-func (r *Runer) Subject() string {
-	if r.msg == nil {
+func (m *M) Subject() string {
+	if m.msg == nil {
 		return ""
 	}
-	return r.msg.Subject
+	return m.msg.Subject
 }
 
-//ReplyTo returns rpc reply topic
-func (r *Runer) ReplyTo() string {
-	if r.msg == nil {
+//ReplyTopic returns rpc reply topic
+func (m *M) ReplyTopic() string {
+	if m.msg == nil {
 		return ""
 	}
-	return r.msg.Reply
+	return m.msg.Reply
 }
 
 //StopEngine stop engine
-func (r *Runer) StopEngine() {
-	r.engine.Stop()
+func (m *M) StopEngine() {
+	m.engine.Stop()
 }

@@ -13,26 +13,26 @@ import (
 func runrpc(c *nats.Conn, wg *sync.WaitGroup) {
 	rr := natsrpc.New(c, "bigzz.api")
 
-	e := rr.Register("bonus", func(r *natsrpc.Runer) {
+	e := rr.Register("bonus", func(r *natsrpc.M) {
 		param := &BonusReq{}
 		e := r.Decode(param)
 		if e != nil {
 			log.Printf("Can't decode %v, err: %v", r.RawData(), e)
 		}
-		log.Printf("RPC1. Get %s -> %s.\n Param %v; %v", r.Subject(), r.ReplyTo(), param.Accaunt, param.Total)
+		log.Printf("RPC1. Get %s -> %s.\n Param %v; %v", r.Subject(), r.ReplyTopic(), param.Accaunt, param.Total)
 		resp := &BonusResp{param.Accaunt, param.Total * 0.9, 10.0, "RPC1. External discount 10%"}
 		r.Reply(resp)
 		if e != nil {
 			log.Printf("Cant publish respond  %v", e)
 		}
 	},
-		func(r *natsrpc.Runer) {
+		func(r *natsrpc.M) {
 			param := &BonusReq{}
 			e := r.Decode(param)
 			if e != nil {
 				log.Printf("Can't decode %v, err: %v", r.RawData(), e)
 			}
-			log.Printf("RPC2. Get %s -> %s.\n Param %v; %v", r.Subject(), r.ReplyTo(), param.Accaunt, param.Total)
+			log.Printf("RPC2. Get %s -> %s.\n Param %v; %v", r.Subject(), r.ReplyTopic(), param.Accaunt, param.Total)
 			resp := &BonusResp{param.Accaunt, param.Total - param.Total*0.9, 10.0, "RPC2. Cashback"}
 			r.Reply(resp)
 			if e != nil {
@@ -43,7 +43,7 @@ func runrpc(c *nats.Conn, wg *sync.WaitGroup) {
 		log.Printf("Cant Register %v; %v", "bonus", e)
 	}
 
-	e = rr.Register("bonus", func(r *natsrpc.Runer) {
+	e = rr.Register("bonus", func(r *natsrpc.M) {
 		param := &BonusReq{}
 		e := r.Decode(param)
 		if e != nil {
@@ -60,7 +60,7 @@ func runrpc(c *nats.Conn, wg *sync.WaitGroup) {
 		log.Printf("Cant Register %v; %v", "bonus", e)
 	}
 
-	e = rr.Register("quit", func(r *natsrpc.Runer) {
+	e = rr.Register("quit", func(r *natsrpc.M) {
 		log.Print("Stopping rpc....")
 		r.Reply("I'm stopping")
 		r.StopEngine()
