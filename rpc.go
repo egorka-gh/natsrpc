@@ -71,7 +71,10 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	if engine.rpcs == nil {
 		engine.rpcs = make(map[string]*runer)
 	}
-	subj := engine.SubjectBase + "." + cmd
+	subj := cmd
+	if len(engine.SubjectBase) > 0 {
+		subj = engine.SubjectBase + "." + subj
+	}
 	r, ok := engine.rpcs[subj]
 	if !ok {
 		//init rpc
@@ -107,10 +110,14 @@ func (engine *Engine) Run() error {
 		select {
 		case _, ok := <-engine.exit:
 			if !ok {
+				engine.rpcsMu.Lock()
 				engine.exit = nil
+				engine.rpcsMu.Unlock()
 			}
 		}
 	}
+
+	log.Print("natsrpc: Stopping...")
 
 	//usubcribe
 	for _, r := range engine.rpcs {
@@ -123,6 +130,7 @@ func (engine *Engine) Run() error {
 	for _, r := range engine.rpcs {
 		r.wait()
 	}
+	log.Print("natsrpc: Exit")
 
 	//exit
 	return nil
@@ -130,8 +138,11 @@ func (engine *Engine) Run() error {
 
 //Stop blocking
 func (engine *Engine) Stop() {
-
-	close(engine.exit)
+	engine.rpcsMu.Lock()
+	defer engine.rpcsMu.Unlock()
+	if engine.exit != nil {
+		close(engine.exit)
+	}
 }
 
 //callback 4 nats msg
@@ -143,9 +154,9 @@ func (r *runer) run(msg *nats.Msg) {
 		engine: r.engine,
 	}
 	r.mu.Lock()
-	var handlers = make(handlersChain, 0, len(r.handlers))
-	copy(handlers, r.handlers)
-	//handlers = append(handlersChain{}, r.handlers...)
+	//var handlers = make(handlersChain, 0, len(r.handlers))
+	//copy(handlers, r.handlers)
+	var handlers = append(handlersChain{}, r.handlers...)
 	r.cnt++
 	r.mu.Unlock()
 
