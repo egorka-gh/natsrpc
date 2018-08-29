@@ -64,7 +64,7 @@ func main() {
 	}
 
 	//TODO check params
-	benchmark = bench.NewBenchmark("NATS", *numMsgs, *numPubs**numMsgs)
+	benchmark = bench.NewBenchmark("NATS", 2, *numPubs)
 
 	var startwg sync.WaitGroup
 	var donewg sync.WaitGroup
@@ -76,11 +76,12 @@ func main() {
 	// Run rpc Subscribers first
 	startwg.Add(1)
 	//for i := 0; i < *numSubs; i++ {
-	go runSubscriber(&startwg, &donewg, opts, int64(calls), *numMsgs, *numHnds, *msgSize)
+	go runSubscriber(&startwg, &donewg, opts, *numPubs, *numMsgs, *numHnds, *msgSize)
 	//}
 	startwg.Wait()
 
 	//listen replies
+	//TODO it's not in bench
 	nc, err := opts.Connect()
 	received := 0
 	defer nc.Close()
@@ -157,7 +158,7 @@ func runPublisher(startwg, donewg *sync.WaitGroup, opts nats.Options, numMsgs in
 	donewg.Done()
 }
 
-func runSubscriber(startwg, donewg *sync.WaitGroup, opts nats.Options, total int64, numMsgs int, numHnds int, msgSize int) {
+func runSubscriber(startwg, donewg *sync.WaitGroup, opts nats.Options, numPubs int, numMsgs int, numHnds int, msgSize int) {
 	nc, err := opts.Connect()
 	if err != nil {
 		log.Fatalf("Can't connect: %v\n", err)
@@ -168,7 +169,8 @@ func runSubscriber(startwg, donewg *sync.WaitGroup, opts nats.Options, total int
 	subj := args[0]
 	//repl := args[1]
 
-	received := int64(0)
+	total := int64(numPubs * numMsgs * numHnds)
+	done := int64(0)
 	start := time.Now()
 
 	for i := 0; i < numMsgs; i++ {
@@ -183,9 +185,9 @@ func runSubscriber(startwg, donewg *sync.WaitGroup, opts nats.Options, total int
 					log.Fatal(err)
 				}
 
-				cnt := atomic.AddInt64(&received, 1)
+				cnt := atomic.AddInt64(&done, 1)
 				if cnt >= total {
-					benchmark.AddSubSample(bench.NewSample(int(total), msgSize, start, time.Now(), nc))
+					benchmark.AddSubSample(bench.NewSample(numPubs*numMsgs, msgSize, start, time.Now(), nc))
 					log.Printf("Total Handler calls: %d\n", cnt)
 					r.StopEngine()
 				}
