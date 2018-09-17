@@ -20,7 +20,7 @@ type JsonEncoder struct {
 	// Empty
 }
 
-//Encode
+//Encode value
 func (je *JsonEncoder) Encode(v interface{}) ([]byte, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -29,7 +29,7 @@ func (je *JsonEncoder) Encode(v interface{}) ([]byte, error) {
 	return b, nil
 }
 
-//Decode
+//Decode value
 func (je *JsonEncoder) Decode(data []byte, vPtr interface{}) (err error) {
 	switch arg := vPtr.(type) {
 	case *string:

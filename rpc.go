@@ -144,10 +144,15 @@ func (engine *Engine) Run() error {
 		return errors.New("natsrpc: Not connected")
 	}
 
+	engine.rpcsMu.Lock()
+	if engine.closed {
+		return errors.New("natsrpc: engine is stoped")
+	}
+	engine.exit = make(chan struct{})
+	engine.rpcsMu.Unlock()
 	log.Print("natsrpc: Running")
 
-	engine.exit = make(chan struct{})
-	//loop while engine.exit not closed
+	//loop while engine.exit not closed (StopSignal)
 	for engine.exit != nil {
 		select {
 		case _, ok := <-engine.exit:
@@ -159,26 +164,8 @@ func (engine *Engine) Run() error {
 		}
 	}
 
-	//get stop
-	engine.rpcsMu.Lock()
-	defer engine.rpcsMu.Unlock()
+	engine.Stop()
 
-	log.Print("natsrpc: Stopping...")
-
-	//usubcribe
-	for _, r := range engine.rpcs {
-		if r.sub != nil {
-			r.sub.Unsubscribe()
-		}
-	}
-
-	//waite for started runers before quit
-	for _, r := range engine.rpcs {
-		r.wait()
-	}
-	log.Print("natsrpc: Exit")
-
-	//exit
 	return nil
 }
 
@@ -193,8 +180,32 @@ func (engine *Engine) StopSignal() {
 
 //Stop stop engine
 //unregister & stop all rpc
-//TODO implement
-func (engine *Engine) Stop() {
+func (engine *Engine) Stop() error {
+
+	engine.rpcsMu.Lock()
+	defer engine.rpcsMu.Unlock()
+	if engine.closed {
+		return nil
+	}
+
+	engine.closed = true
+
+	log.Print("natsrpc: stopping...")
+
+	//usubcribe
+	for _, r := range engine.rpcs {
+		if r.sub != nil {
+			r.sub.Unsubscribe()
+		}
+	}
+
+	//waite for all started handlers
+	for _, r := range engine.rpcs {
+		r.wait()
+	}
+
+	log.Print("natsrpc: stopped")
+	return nil
 }
 
 //get command topic
@@ -214,7 +225,7 @@ func (r *runer) run(msg *nats.Msg) {
 		engine: r.engine,
 	}
 	r.Lock()
-	//var handlers = make(handlersChain, 0, len(r.handlers))
+
 	//copy(handlers, r.handlers)
 	var handlers = append(handlersChain{}, r.handlers...)
 	r.cnt++
