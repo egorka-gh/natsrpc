@@ -23,12 +23,14 @@ type Engine struct {
 	rpcsMu  sync.RWMutex
 	rpcs    map[string]*runer
 	exit    chan struct{}
+	closed  bool
 }
 
 //Runer runs registered HandlerFunc on concrete subscription
 type runer struct {
-	mu       sync.Mutex
+	sync.Mutex
 	engine   *Engine
+	topic    string
 	handlers handlersChain
 	sub      *nats.Subscription
 	cnt      int
@@ -57,6 +59,7 @@ func New(cnn *nats.Conn, base string) *Engine {
 
 //Register register rpc call's
 //rpc commad is the last part of subj, if SubjectBase='bigzz.api' and cmd='getbonus' full subject = 'bigzz.api.getbonus'
+//subscribes on rpc command or adds handler(s) to existing subscription
 func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	if engine.natsCnn == nil {
 		return errors.New("natsrpc: has no connection")
@@ -68,21 +71,24 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	engine.rpcsMu.Lock()
 	defer engine.rpcsMu.Unlock()
 
+	if engine.closed {
+		return errors.New("natsrpc: engine is stoped")
+	}
+
 	if engine.rpcs == nil {
 		engine.rpcs = make(map[string]*runer)
 	}
-	subj := cmd
-	if len(engine.SubjectBase) > 0 {
-		subj = engine.SubjectBase + "." + subj
-	}
+	subj := engine.topic(cmd)
 	r, ok := engine.rpcs[subj]
 	if !ok {
 		//init rpc
-		r = &runer{engine: engine, handlers: handlersChain{}}
+		r = &runer{engine: engine, topic: subj, handlers: handlersChain{}}
 		engine.rpcs[subj] = r
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.Lock()
+	defer r.Unlock()
+
+	log.Print("natsrpc: add handlers to " + subj)
 	r.handlers = append(r.handlers, handler...)
 	//subscribe if new rpc
 	if !ok {
@@ -91,21 +97,57 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 			return err
 		}
 		r.sub = sub
-
+		log.Print("natsrpc: subscribed to " + subj)
 	}
 	return nil
 }
 
-//Run simple blocks
+//UnRegister - unsubscribe from rpc commad
+//waits all running handlers
+func (engine *Engine) UnRegister(cmd string) error {
+	if engine.natsCnn == nil {
+		return errors.New("natsrpc: has no connection")
+	}
+	if engine.rpcs == nil {
+		return nil
+	}
+
+	subj := engine.topic(cmd)
+
+	engine.rpcsMu.Lock()
+	r, ok := engine.rpcs[subj]
+	if !ok {
+		engine.rpcsMu.Unlock()
+		return nil
+	}
+
+	r.Lock()
+	if r.sub != nil {
+		r.sub.Unsubscribe()
+		r.sub = nil
+	}
+	log.Print("natsrpc: unsubscribed from " + subj)
+	delete(engine.rpcs, subj)
+	r.Unlock()
+	engine.rpcsMu.Unlock()
+
+	r.wait()
+	log.Print("natsrpc: complite UnRegister " + subj)
+	return nil
+}
+
+//Run simple blocks current thread (waiting Stop)
+//TODO refactor - create Stop (unregister & stop all rpc)
 func (engine *Engine) Run() error {
 
 	if engine.natsCnn == nil {
 		return errors.New("natsrpc: Not connected")
 	}
 
-	log.Print("natsrpc: Started")
+	log.Print("natsrpc: Running")
 
 	engine.exit = make(chan struct{})
+	//loop while engine.exit not closed
 	for engine.exit != nil {
 		select {
 		case _, ok := <-engine.exit:
@@ -116,6 +158,10 @@ func (engine *Engine) Run() error {
 			}
 		}
 	}
+
+	//get stop
+	engine.rpcsMu.Lock()
+	defer engine.rpcsMu.Unlock()
 
 	log.Print("natsrpc: Stopping...")
 
@@ -136,8 +182,8 @@ func (engine *Engine) Run() error {
 	return nil
 }
 
-//Stop blocking
-func (engine *Engine) Stop() {
+//StopSignal stop blocking Run()
+func (engine *Engine) StopSignal() {
 	engine.rpcsMu.Lock()
 	defer engine.rpcsMu.Unlock()
 	if engine.exit != nil {
@@ -145,20 +191,34 @@ func (engine *Engine) Stop() {
 	}
 }
 
+//Stop stop engine
+//unregister & stop all rpc
+//TODO implement
+func (engine *Engine) Stop() {
+}
+
+//get command topic
+func (engine *Engine) topic(cmd string) string {
+	if len(engine.SubjectBase) > 0 {
+		return engine.SubjectBase + "." + cmd
+	}
+	return cmd
+}
+
 //callback 4 nats msg
 func (r *runer) run(msg *nats.Msg) {
 	//TODO decode msg from msgp
-	//create copy
+	//create rpc message context
 	m := &M{
 		msg:    msg,
 		engine: r.engine,
 	}
-	r.mu.Lock()
+	r.Lock()
 	//var handlers = make(handlersChain, 0, len(r.handlers))
 	//copy(handlers, r.handlers)
 	var handlers = append(handlersChain{}, r.handlers...)
 	r.cnt++
-	r.mu.Unlock()
+	r.Unlock()
 
 	//run in parallel
 	for _, h := range handlers {
@@ -220,5 +280,5 @@ func (m *M) ReplyTopic() string {
 
 //StopEngine stop engine
 func (m *M) StopEngine() {
-	m.engine.Stop()
+	m.engine.StopSignal()
 }
