@@ -20,10 +20,10 @@ type Engine struct {
 	Enc         Encoder
 
 	natsCnn *nats.Conn
-	rpcsMu  sync.RWMutex
-	rpcs    map[string]*runer
-	exit    chan struct{}
-	closed  bool
+	sync.Mutex
+	rpcs   map[string]*runer
+	exit   chan struct{}
+	closed bool
 }
 
 //Runer runs registered HandlerFunc on concrete subscription
@@ -68,8 +68,8 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 		return errors.New("natsrpc: Handler required")
 	}
 
-	engine.rpcsMu.Lock()
-	defer engine.rpcsMu.Unlock()
+	engine.Lock()
+	defer engine.Unlock()
 
 	if engine.closed {
 		return errors.New("natsrpc: engine is stoped")
@@ -114,10 +114,10 @@ func (engine *Engine) UnRegister(cmd string) error {
 
 	subj := engine.topic(cmd)
 
-	engine.rpcsMu.Lock()
+	engine.Lock()
 	r, ok := engine.rpcs[subj]
 	if !ok {
-		engine.rpcsMu.Unlock()
+		engine.Unlock()
 		return nil
 	}
 
@@ -129,27 +129,26 @@ func (engine *Engine) UnRegister(cmd string) error {
 	log.Print("natsrpc: unsubscribed from " + subj)
 	delete(engine.rpcs, subj)
 	r.Unlock()
-	engine.rpcsMu.Unlock()
+	engine.Unlock()
 
 	r.wait()
 	log.Print("natsrpc: complite UnRegister " + subj)
 	return nil
 }
 
-//Run simple blocks current thread (waiting Stop)
-//TODO refactor - create Stop (unregister & stop all rpc)
+//Run simple blocks current thread (waiting StopSignal)
 func (engine *Engine) Run() error {
 
 	if engine.natsCnn == nil {
 		return errors.New("natsrpc: Not connected")
 	}
 
-	engine.rpcsMu.Lock()
+	engine.Lock()
 	if engine.closed {
 		return errors.New("natsrpc: engine is stoped")
 	}
 	engine.exit = make(chan struct{})
-	engine.rpcsMu.Unlock()
+	engine.Unlock()
 	log.Print("natsrpc: Running")
 
 	//loop while engine.exit not closed (StopSignal)
@@ -157,9 +156,9 @@ func (engine *Engine) Run() error {
 		select {
 		case _, ok := <-engine.exit:
 			if !ok {
-				engine.rpcsMu.Lock()
+				engine.Lock()
 				engine.exit = nil
-				engine.rpcsMu.Unlock()
+				engine.Unlock()
 			}
 		}
 	}
@@ -171,8 +170,8 @@ func (engine *Engine) Run() error {
 
 //StopSignal stop blocking Run()
 func (engine *Engine) StopSignal() {
-	engine.rpcsMu.Lock()
-	defer engine.rpcsMu.Unlock()
+	engine.Lock()
+	defer engine.Unlock()
 	if engine.exit != nil {
 		close(engine.exit)
 	}
@@ -181,9 +180,11 @@ func (engine *Engine) StopSignal() {
 //Stop stop engine
 //unregister & stop all rpc
 func (engine *Engine) Stop() error {
+	//stop Run() if Stop() called directly
+	defer engine.StopSignal()
 
-	engine.rpcsMu.Lock()
-	defer engine.rpcsMu.Unlock()
+	engine.Lock()
+	defer engine.Unlock()
 	if engine.closed {
 		return nil
 	}
