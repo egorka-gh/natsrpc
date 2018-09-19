@@ -14,7 +14,7 @@ func main() {
 
 	var wg sync.WaitGroup
 	// run rpc
-	runRPC(opts, &wg)
+	runRPC(opts, "tst", []string{"cmd1", "cmd2"}, 3)
 
 	//publish commands
 
@@ -22,12 +22,18 @@ func main() {
 
 }
 
-func runRPC(opts nats.Options, wg *sync.WaitGroup) error {
+func runRPC(opts nats.Options, prefix string, cmd []string, handlers int) (*natsrpc.Engine, error) {
 	nc, err := opts.Connect()
 	if err != nil {
 		log.Fatalf("Can't connect: %v\n", err)
 	}
-	rpc := natsrpc.New(nc, "test")
+	rpc := natsrpc.New(nc, prefix)
 
-	return nil
+	for _, v := range cmd {
+		rpc.Register(v, func(m *natsrpc.M) {
+
+		})
+	}
+
+	return rpc, nil
 }
