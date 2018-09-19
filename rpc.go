@@ -102,19 +102,38 @@ func (engine *Engine) Register(cmd string, handler ...HandlerFunc) error {
 	return nil
 }
 
+//IsRegistered - check if cmd is registered
+func (engine *Engine) IsRegistered(cmd string) bool {
+	if engine.natsCnn == nil {
+		return false
+	}
+	engine.Lock()
+	defer engine.Unlock()
+
+	if engine.closed || engine.rpcs == nil {
+		return false
+	}
+
+	_, ok := engine.rpcs[engine.topic(cmd)]
+	return ok
+}
+
 //UnRegister - unsubscribe from rpc commad
 //waits all running handlers
+//TODO possible bug - while Unsubscribe nats can send message
 func (engine *Engine) UnRegister(cmd string) error {
 	if engine.natsCnn == nil {
 		return errors.New("natsrpc: has no connection")
-	}
-	if engine.rpcs == nil {
-		return nil
 	}
 
 	subj := engine.topic(cmd)
 
 	engine.Lock()
+
+	if engine.rpcs == nil || engine.closed {
+		engine.Unlock()
+		return nil
+	}
 	r, ok := engine.rpcs[subj]
 	if !ok {
 		engine.Unlock()
@@ -126,8 +145,8 @@ func (engine *Engine) UnRegister(cmd string) error {
 		r.sub.Unsubscribe()
 		r.sub = nil
 	}
-	log.Print("natsrpc: unsubscribed from " + subj)
 	delete(engine.rpcs, subj)
+	log.Print("natsrpc: unsubscribed from " + subj)
 	r.Unlock()
 	engine.Unlock()
 
@@ -293,4 +312,14 @@ func (m *M) ReplyTopic() string {
 //StopEngine stop engine
 func (m *M) StopEngine() {
 	m.engine.StopSignal()
+}
+
+//UnRegister rpc command
+func (m *M) UnRegister(cmd string) error {
+	return m.engine.UnRegister(cmd)
+}
+
+//IsRegistered - check if cmd is registered
+func (m *M) IsRegistered(cmd string) bool {
+	return m.engine.IsRegistered(cmd)
 }
